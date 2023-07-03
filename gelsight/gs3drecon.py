@@ -240,12 +240,15 @@ class RGB2NormNetR15(nn.Module):
         return x
 
 class Reconstruction3D:
-    def __init__(self, finger, dev):
+    def __init__(self, finger, dev, zero_path=None):
         self.finger = finger
         self.cpuorgpu = "cpu"
-        self.dm_zero_counter = 0
-        self.dm_zero = np.zeros((dev.imgw, dev.imgh))
-        pass
+        if zero_path is None:
+            self.dm_zero_counter = 0
+            self.dm_zero = np.zeros((dev.imgw, dev.imgh))
+        else:
+            self.dm_zero_counter = 50
+            self.dm_zero = np.load(zero_path)
 
     def load_nn(self, net_path, cpuorgpu):
 
@@ -279,6 +282,12 @@ class Reconstruction3D:
         self.net = net
 
         return self.net
+
+    def save_zero(self, save_path):
+        if self.dm_zero_counter < 50:
+            raise ValueError("not fully zero'd yet!")
+        
+        np.save(save_path, self.dm_zero)
 
     def get_depthmap(self, frame, mask_markers, cm=None):
         MARKER_INTERPOLATE_FLAG = mask_markers
