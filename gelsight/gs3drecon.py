@@ -246,9 +246,12 @@ class Reconstruction3D:
         if zero_path is None:
             self.dm_zero_counter = 0
             self.dm_zero = np.zeros((dev.imgw, dev.imgh))
+            self.gx_zero = np.zeros((dev.imgw, dev.imgh))
+            self.gy_zero = np.zeros((dev.imgw, dev.imgh))
         else:
             self.dm_zero_counter = 50
-            self.dm_zero = np.load(zero_path)
+            saved_data = np.load(zero_path)
+            self.dm_zero, self.gx_zero, self.gy_zero = saved_data[0], saved_data[1], saved_data[2]
 
     def load_nn(self, net_path, cpuorgpu):
 
@@ -287,9 +290,9 @@ class Reconstruction3D:
         if self.dm_zero_counter < 50:
             raise ValueError("not fully zero'd yet!")
         
-        np.save(save_path, self.dm_zero)
+        np.save(save_path, np.stack((self.dm_zero, self.gx_zero, self.gy_zero)))
 
-    def get_depthmap(self, frame, mask_markers, cm=None):
+    def get_depthmap(self, frame, mask_markers, cm=None, return_grads=False):
         MARKER_INTERPOLATE_FLAG = mask_markers
 
         ''' find contact region '''
@@ -377,9 +380,13 @@ class Reconstruction3D:
         ''' remove initial zero depth '''
         if self.dm_zero_counter < 50:
             self.dm_zero += dm
+            self.gx_zero += gx_interp
+            self.gy_zero += gy_interp
             print ('zeroing depth. do not touch the gel!')
             if self.dm_zero_counter == 49:
                 self.dm_zero /= self.dm_zero_counter
+                self.gx_zero /= self.dm_zero_counter
+                self.gy_zero /= self.dm_zero_counter
         if self.dm_zero_counter == 50:
             print ('Ok to touch me now!')
         self.dm_zero_counter += 1
@@ -407,13 +414,6 @@ class Reconstruction3D:
         # # dm = np.clip(dm / img.max(), 0, 1)
         # # dm = 255 * dm
         # # dm = dm.astype(np.uint8)
-
-        ''' normalize gradients for plotting purpose '''
-        #print(gx.min(), gx.max(), gy.min(), gy.max())
-        gx = (gx - gx.min()) / (gx.max() - gx.min())
-        gy = (gy - gy.min()) / (gy.max() - gy.min())
-        gx_interp = (gx_interp - gx_interp.min()) / (gx_interp.max() - gx_interp.min())
-        gy_interp = (gy_interp - gy_interp.min()) / (gy_interp.max() - gy_interp.min())
 
         return dm
 
