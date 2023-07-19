@@ -102,7 +102,7 @@ class Camera:
             self.cam.set_wb_kg(1.0)
             self.cam.set_wb_kb(1.0)
             # self.cam.set_gammaC(0.5)
-            self.cam.set_framerate(60)
+            self.cam.set_framerate(25)
             self.cam.set_gpo_mode('XI_GPO_EXPOSURE_ACTIVE')
             self.cam.set_exposure(14000)  ## microseconds
             self.cam.set_manual_wb(1)
@@ -121,6 +121,7 @@ class Camera:
         # The camera in Mini is a USB camera and uses open cv to get the video data from the streamed video
         elif self.name == Finger.MINI:
             self.cam = cv2.VideoCapture(self.dev_id)
+            self.cam.set(cv2.CAP_PROP_BUFFERSIZE, 3)
             if self.cam is None or not self.cam.isOpened():
                 print('Warning: unable to open video source: ', self.dev_id)
             self.imgw = 240

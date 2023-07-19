@@ -17,7 +17,7 @@ if __name__ == "__main__":
         DRAW_MARKERS = False
 
     if USE_MINI_LIVE:
-        gs = gsdevice.Camera(gsdevice.Finger.MINI, 0)
+        gs = gsdevice.Camera(gsdevice.Finger.MINI, 1)
         WHILE_COND = 1
         gs.connect()
     else:

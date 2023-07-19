@@ -85,7 +85,7 @@ def main(argv):
     imgh = 240
 
     USE_LIVE_R1 = False
-    calibrate = False
+    calibrate = True
     border_size = 25
 
     outdir = './TEST/'
@@ -131,6 +131,7 @@ def main(argv):
 
     # set the format into MJPG in the FourCC format
     cap.set(cv2.CAP_PROP_FOURCC,cv2.VideoWriter_fourcc('M','J','P','G'))
+    cap.set(cv2.CAP_PROP_BUFFERSIZE,1)
 
     # Resize scale for faster image processing
     setting.init()

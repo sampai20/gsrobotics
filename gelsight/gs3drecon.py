@@ -21,8 +21,9 @@ class Finger(enum.Enum):
 
 def find_marker(gray):
     mask = cv2.inRange(gray, 0, 70)
-    # kernel = np.ones((2, 2), np.uint8)
-    # dilation = cv2.dilate(mask, kernel, iterations=1)
+    kernel = np.ones((3, 3), np.uint8)
+    #dilation = cv2.dilate(mask, kernel, iterations=1)
+    #print(mask, dilation)
     return mask
 
 def dilate(img, ksize=5, iter=1):
@@ -240,14 +241,14 @@ class RGB2NormNetR15(nn.Module):
         return x
 
 class Reconstruction3D:
-    def __init__(self, finger, dev, zero_path=None):
+    def __init__(self, finger, dims, zero_path=None):
         self.finger = finger
         self.cpuorgpu = "cpu"
         if zero_path is None:
             self.dm_zero_counter = 0
-            self.dm_zero = np.zeros((dev.imgw, dev.imgh))
-            self.gx_zero = np.zeros((dev.imgw, dev.imgh))
-            self.gy_zero = np.zeros((dev.imgw, dev.imgh))
+            self.dm_zero = np.zeros(dims)
+            self.gx_zero = np.zeros(dims)
+            self.gy_zero = np.zeros(dims)
         else:
             self.dm_zero_counter = 50
             saved_data = np.load(zero_path)
@@ -316,8 +317,6 @@ class Reconstruction3D:
             # ind2not = np.vstack(np.where(~markermask)).T
             # ind3 = matching_rows(ind1, ind2)
             # cmmm[(ind3[:, 0], ind3[:, 1])] = 1.
-            cmandmm = (np.logical_and(cm, markermask)).astype('uint8')
-            cmandnotmm = (np.logical_and(cm, ~markermask)).astype('uint8')
 
         ''' Get depth image with NN '''
         nx = np.zeros(frame.shape[:2])
@@ -370,7 +369,6 @@ class Reconstruction3D:
             gx_interp, gy_interp = gx, gy
 
         # nz = np.sqrt(1 - nx ** 2 - ny ** 2)
-        boundary = np.zeros((imgh, imgw))
 
         dm = poisson_dct_neumaan(gx_interp, gy_interp)
         dm = np.reshape(dm, (imgh, imgw))
