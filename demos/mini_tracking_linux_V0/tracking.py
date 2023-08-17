@@ -85,7 +85,7 @@ def main(argv):
     imgh = 240
 
     USE_LIVE_R1 = False
-    calibrate = True
+    calibrate = False
     border_size = 25
 
     outdir = './TEST/'
@@ -124,14 +124,14 @@ def main(argv):
         gs = GelSight(0)
         WHILE_COND = 1
     else:
-        cameras = find_cameras()
-        cap = cv2.VideoCapture(cameras[0])
+        camera = 0
+        cap = cv2.VideoCapture(camera)
         # cap = cv2.VideoCapture('http://pi:robits@raspiatgelsightinc.local:8080/?action=stream')
         WHILE_COND = cap.isOpened()
 
     # set the format into MJPG in the FourCC format
     cap.set(cv2.CAP_PROP_FOURCC,cv2.VideoWriter_fourcc('M','J','P','G'))
-    cap.set(cv2.CAP_PROP_BUFFERSIZE,1)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE,3)
 
     # Resize scale for faster image processing
     setting.init()
@@ -211,6 +211,7 @@ def main(argv):
     frameno = 0
     try:
         while (WHILE_COND):
+            start = time.time()
 
             if USE_LIVE_R1:
                 gs.cam.get_image(gs.img)
@@ -253,7 +254,7 @@ def main(argv):
 
                 ### matching
                 m.run()
-                # print(time.time() - tm)
+                print("matching", time.time() - tm)
 
                 ### matching result
                 """
@@ -288,27 +289,16 @@ def main(argv):
             mask_img = np.asarray(mask)
             # mask_img = cv2.merge((mask_img, mask_img, mask_img))
 
-            bigframe = cv2.resize(frame, (frame.shape[1]*3, frame.shape[0]*3))
-            cv2.imshow('frame', bigframe)
+            cv2.imshow('frame', frame)
             # cv2.moveWindow('frame', 800, 200)
-            bigmask = cv2.resize(mask_img*255, (mask_img.shape[1]*3, mask_img.shape[0]*3))
-            cv2.imshow('mask', bigmask)
+            cv2.imshow('mask', mask_img * 255)
 
-            if SAVE_ONE_IMG_FLAG:
-                cv2.imwrite(imgonlyfile, raw_img)
-                cv2.imwrite(maskfile, mask*255)
-                SAVE_ONE_IMG_FLAG = False
-
-            if calibrate:
-                ### Display the mask
-                cv2.imshow('mask',mask_img*255)
-            if SAVE_VIDEO_FLAG:
-                out.write(frame)
-            # print(frame.shape)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                break
 
-            time.sleep(0.1)
+            end = time.time()
+            print(end - start)
+
 
     except KeyboardInterrupt:
         print('Interrupted!')
