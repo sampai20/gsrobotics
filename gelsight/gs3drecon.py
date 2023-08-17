@@ -6,9 +6,13 @@ import numpy as np
 import math
 import enum
 import os
+import time
 import cv2
 from scipy.interpolate import griddata
+from scipy.spatial import KDTree
+from scipy.ndimage.filters import maximum_filter, minimum_filter
 from scipy import fftpack
+from collections import deque
 
 
 
@@ -20,11 +24,16 @@ class Finger(enum.Enum):
     MINI = 4
 
 def find_marker(gray):
-    mask = cv2.inRange(gray, 0, 70)
-    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.inRange(gray, 5, 55)
+    mask = np.asarray(mask)
+    mask = np.where(mask, 1, 0).astype('uint8')
+    neighborhood_size = 6
+    data_max = maximum_filter(mask, neighborhood_size, mode='constant', cval=0)
+    new_mask = np.where(data_max > 0, 1, 0).astype('uint8')
     #dilation = cv2.dilate(mask, kernel, iterations=1)
     #print(mask, dilation)
-    return mask
+    cv2.waitKey(1)
+    return new_mask
 
 def dilate(img, ksize=5, iter=1):
     kernel = np.ones((ksize, ksize), np.uint8)
@@ -91,43 +100,81 @@ def interpolate_gradients(gx, gy, img, cm, markermask):
 
     return gx_interpol, gy_interpol
 
+def manhattan_griddata(points, values, marker_points):
+    start = time.time()
+    to_visit = []
+    answers = np.ones((245, 325)) * 5
+    print(points.shape[0], marker_points.shape[0])
 
-def interpolate_grad(img, mask):
+    answers[points[:, 0], points[:, 1]] = values
+    answers[marker_points[:, 0], marker_points[:, 1]] = 10
+
+
+    for p in range(points.shape[0]):
+        to_visit.append((points[p]))
+
+    mid = time.time()
+
+    deltas = np.array([(0, 1), (0, -1), (1, 0), (-1, 0)])
+    ct = 0
+    while len(to_visit):
+        ct += 1
+        a = to_visit.pop()
+        neighbors = a[None, :] + deltas
+        neighbor_answers = answers[neighbors[:, 0], neighbors[:, 1]]
+        for i in range(4):
+            if neighbor_answers[i] == 10:
+                answers[neighbors[i][0], neighbors[i][1]] = answers[a[0], a[1]]
+                to_visit.append(neighbors[i])
+
+    res = answers[marker_points[:, 0], marker_points[:, 1]]
+
+    print(ct)
+
+    end = time.time()
+
+    return res
+
+
+def interpolate_grad(gx, gy, mask):
     # mask = (soft_mask > 0.5).astype(np.uint8) * 255
     # pixel around markers
-    mask_around = (dilate(mask, ksize=3, iter=2) > 0) & ~(mask != 0)
+    mask_around = (dilate(mask, ksize=3, iter=2) > 0) & (mask == 0)
     # mask_around = mask == 0
-    mask_around = mask_around.astype(np.uint8)
 
-    x, y = np.arange(img.shape[0]), np.arange(img.shape[1])
+    x, y = np.arange(gx.shape[0]), np.arange(gx.shape[1])
     yy, xx = np.meshgrid(y, x)
 
-    # mask_zero = mask == 0
-    mask_zero = mask_around == 1
     # cv2.imshow("mask_zero", mask_zero*1.)
 
     # if np.where(mask_zero)[0].shape[0] != 0:
     #     print ('interpolating')
-    mask_x = xx[mask_around == 1]
-    mask_y = yy[mask_around == 1]
-    points = np.vstack([mask_x, mask_y]).T
-    values = img[mask_x, mask_y]
-    markers_points = np.vstack([xx[mask != 0], yy[mask != 0]]).T
-    method = "nearest"
-    # method = "linear"
-    # method = "cubic"
-    x_interp = griddata(points, values, markers_points, method=method)
-    x_interp[x_interp != x_interp] = 0.0
-    ret = img.copy()
-    ret[mask != 0] = x_interp
+    mask_x = xx[mask_around]
+    mask_y = yy[mask_around]
+    points = np.stack([mask_x, mask_y], axis=1)
+    values = np.stack((gx[mask_x, mask_y], gy[mask_x, mask_y]), axis=0)
+    markers_points = np.stack([xx[mask != 0], yy[mask != 0]], axis=1)
+
+
+    kdtree = KDTree(points)
+    d, i = kdtree.query(markers_points, p=2, distance_upper_bound = 15, workers=1)
+    interp_values = values[:, i]
+
+    gx_interp = gx
+    gy_interp = gy
+    gx_interp[mask != 0] = interp_values[0, :]
+    gy_interp[mask != 0] = interp_values[1, :]
     # else:
     #     ret = img
-    return ret
+    return gx_interp, gy_interp
 
 def demark(gx, gy, markermask):
+    start = time.time()
     # mask = find_marker(img)
-    gx_interp = interpolate_grad(gx.copy(), markermask)
-    gy_interp = interpolate_grad(gy.copy(), markermask)
+    gx_interp, gy_interp = interpolate_grad(gx, gy, markermask)
+    # gx_interp = interpolate_grad(gx.copy(), markermask)
+    # gy_interp = interpolate_grad(gy.copy(), markermask)
+    end = time.time()
     return gx_interp, gy_interp
 
 #@njit(parallel=True)
@@ -296,6 +343,8 @@ class Reconstruction3D:
     def get_depthmap(self, frame, mask_markers, cm=None, return_grads=False):
         MARKER_INTERPOLATE_FLAG = mask_markers
 
+        start = time.time()
+
         ''' find contact region '''
         # cm, cmindx = find_contact_mask(f1, f0)
         ###################################################################
@@ -303,31 +352,26 @@ class Reconstruction3D:
         ##################################################################
         if (cm is None):
             cm, cmindx = np.ones(frame.shape[:2]), np.where(np.ones(frame.shape[:2]))
-        imgh = frame.shape[:2][0]
-        imgw = frame.shape[:2][1]
+
 
         if MARKER_INTERPOLATE_FLAG:
             ''' find marker mask '''
-            markermask = find_marker(cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY))
+            markermask = find_marker(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
             cm = ~markermask
-            '''intersection of cm and markermask '''
-            # cmmm = np.zeros(img.shape[:2])
-            # ind1 = np.vstack(np.where(cm)).T
-            # ind2 = np.vstack(np.where(markermask)).T
-            # ind2not = np.vstack(np.where(~markermask)).T
-            # ind3 = matching_rows(ind1, ind2)
-            # cmmm[(ind3[:, 0], ind3[:, 1])] = 1.
+
+        cmx, cmy = np.where(cm)
+        imgh = frame.shape[:2][0]
+        imgw = frame.shape[:2][1]
 
         ''' Get depth image with NN '''
-        nx = np.zeros(frame.shape[:2])
-        ny = np.zeros(frame.shape[:2])
+        normals = np.zeros((2, frame.shape[0], frame.shape[1]))
         dm = np.zeros(frame.shape[:2])
 
         ''' ENTIRE CONTACT MASK THRU NN '''
         # if np.where(cm)[0].shape[0] != 0:
-        rgb = frame[np.where(cm)] / 255
+        rgb = frame[cmx, cmy] / 255
         # rgb = diffimg[np.where(cm)]
-        pxpos = np.vstack(np.where(cm)).T
+        pxpos = np.vstack((cmx, cmy)).T
         # pxpos[:, [1, 0]] = pxpos[:, [0, 1]] # swapping
         pxpos[:, 0], pxpos[:, 1] = pxpos[:, 0] / imgh, pxpos[:, 1] / imgw
         # the neural net was trained using height=320, width=240
@@ -338,10 +382,11 @@ class Reconstruction3D:
         features = torch.from_numpy(features).float().to(self.cpuorgpu)
         with torch.no_grad():
             self.net.eval()
-            out = self.net(features)
+            out = self.net(features).cpu().detach().numpy()
 
-        nx[np.where(cm)] = out[:, 0].cpu().detach().numpy()
-        ny[np.where(cm)] = out[:, 1].cpu().detach().numpy()
+
+
+        normals[:, cmx, cmy] = out.T
         # print(nx.min(), nx.max(), ny.min(), ny.max())
         # nx = 2 * ((nx - nx.min()) / (nx.max() - nx.min())) -1
         # ny = 2 * ((ny - ny.min()) / (ny.max() - ny.min())) -1
@@ -354,19 +399,20 @@ class Reconstruction3D:
         # gy = (b-a) * ((gy - gy.min()) / (gy.max() - gy.min())) + a
         '''OPTION#2 calculate gx, gy from nx, ny. '''
         ### normalize normals to get gradients for poisson
-        nz = np.sqrt(1 - nx ** 2 - ny ** 2)
-        if np.isnan(nz).any():
-            print ('nan found')
+        nz = np.sqrt(1 - np.sum(normals ** 2, axis=0))
         nz[np.where(np.isnan(nz))] = 0
-        gx = nx / nz
-        gy = ny / nz
+        grads = normals / nz[None, :]
+        gx = grads[0]
+        gy = grads[1]
+        mid = time.time()
+
 
         if MARKER_INTERPOLATE_FLAG:
             # gx, gy = interpolate_gradients(gx, gy, img, cm, cmmm)
-            dilated_mm = dilate(markermask, ksize=3, iter=2)
-            gx_interp, gy_interp = demark(gx, gy, dilated_mm)
+            gx_interp, gy_interp = demark(gx, gy, markermask)
         else:
             gx_interp, gy_interp = gx, gy
+
 
         # nz = np.sqrt(1 - nx ** 2 - ny ** 2)
 
@@ -412,6 +458,9 @@ class Reconstruction3D:
         # # dm = np.clip(dm / img.max(), 0, 1)
         # # dm = 255 * dm
         # # dm = dm.astype(np.uint8)
+
+        end = time.time()
+        #print(mid - start, end - mid)
 
         return dm
 
